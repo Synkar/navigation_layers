@@ -19,6 +19,7 @@ void SocialLayer::onInitialize()
   ros::NodeHandle nh("~/" + name_), g_nh;
   current_ = true;
   first_time_ = true;
+  new_msg_available_ = false;
   people_sub_ = nh.subscribe("/people", 1, &SocialLayer::peopleCallback, this);
 }
 
@@ -26,6 +27,7 @@ void SocialLayer::peopleCallback(const people_msgs::People& people)
 {
   boost::recursive_mutex::scoped_lock lock(lock_);
   people_list_ = people;
+  new_msg_available_ = true;
 }
 
 
@@ -37,49 +39,52 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
   std::string global_frame = layered_costmap_->getGlobalFrameID();
   transformed_people_.clear();
 
-  for (unsigned int i = 0; i < people_list_.people.size(); i++)
-  {
-    people_msgs::Person& person = people_list_.people[i];
-    people_msgs::Person tpt;
-    geometry_msgs::PointStamped pt, opt;
-
-    try
+  if(new_msg_available_){
+    new_msg_available_ = false;
+    for (unsigned int i = 0; i < people_list_.people.size(); i++)
     {
-      pt.point.x = person.position.x;
-      pt.point.y = person.position.y;
-      pt.point.z = person.position.z;
-      pt.header.frame_id = people_list_.header.frame_id;
-      pt.header.stamp = people_list_.header.stamp;
-      tf_->transform(pt, opt, global_frame);
-      tpt.position.x = opt.point.x;
-      tpt.position.y = opt.point.y;
-      tpt.position.z = opt.point.z;
+      people_msgs::Person& person = people_list_.people[i];
+      people_msgs::Person tpt;
+      geometry_msgs::PointStamped pt, opt;
 
-      pt.point.x += person.velocity.x;
-      pt.point.y += person.velocity.y;
-      pt.point.z += person.velocity.z;
-      tf_->transform(pt, opt, global_frame);
+      try
+      {
+        pt.point.x = person.position.x;
+        pt.point.y = person.position.y;
+        pt.point.z = person.position.z;
+        pt.header.frame_id = people_list_.header.frame_id;
+        pt.header.stamp = people_list_.header.stamp;
+        tf_->transform(pt, opt, global_frame, ros::Duration(1.0));
+        tpt.position.x = opt.point.x;
+        tpt.position.y = opt.point.y;
+        tpt.position.z = opt.point.z;
 
-      tpt.velocity.x = opt.point.x - tpt.position.x;
-      tpt.velocity.y = opt.point.y - tpt.position.y;
-      tpt.velocity.z = opt.point.z - tpt.position.z;
+        pt.point.x += person.velocity.x;
+        pt.point.y += person.velocity.y;
+        pt.point.z += person.velocity.z;
+        tf_->transform(pt, opt, global_frame, ros::Duration(1.0));
 
-      transformed_people_.push_back(tpt);
-    }
-    catch (tf2::LookupException& ex)
-    {
-      ROS_ERROR("No Transform available Error: %s\n", ex.what());
-      continue;
-    }
-    catch (tf2::ConnectivityException& ex)
-    {
-      ROS_ERROR("Connectivity Error: %s\n", ex.what());
-      continue;
-    }
-    catch (tf2::ExtrapolationException& ex)
-    {
-      ROS_ERROR("Extrapolation Error: %s\n", ex.what());
-      continue;
+        tpt.velocity.x = opt.point.x - tpt.position.x;
+        tpt.velocity.y = opt.point.y - tpt.position.y;
+        tpt.velocity.z = opt.point.z - tpt.position.z;
+
+        transformed_people_.push_back(tpt);
+      }
+      catch (tf2::LookupException& ex)
+      {
+        ROS_ERROR("No Transform available Error: %s\n", ex.what());
+        continue;
+      }
+      catch (tf2::ConnectivityException& ex)
+      {
+        ROS_ERROR("Connectivity Error: %s\n", ex.what());
+        continue;
+      }
+      catch (tf2::ExtrapolationException& ex)
+      {
+        ROS_ERROR("Extrapolation Error: %s\n", ex.what());
+        continue;
+      }
     }
   }
   updateBoundsFromPeople(min_x, min_y, max_x, max_y);
