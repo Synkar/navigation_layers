@@ -47,7 +47,10 @@ void RangeSensorLayer::onInitialize()
 
   nh.param("use_decay", use_decay_, false);
   nh.param("pixel_decay", pixel_decay_, 10.0);
-  nh.param("transform_tolerance_", transform_tolerance_, 0.3);
+  nh.param("transform_tolerance", transform_tolerance_, 0.3);
+
+  int queue_size;
+  nh.param("queue_size", queue_size, 10);
 
   boost::to_upper(sensor_type_name);
   ROS_INFO("%s: %s as input_sensor_type given", name_.c_str(), sensor_type_name.c_str());
@@ -103,7 +106,7 @@ void RangeSensorLayer::onInitialize()
           name_.c_str(), sensor_type_name.c_str());
       }
 
-      range_subs_.push_back(nh.subscribe(topic_name, 100, &RangeSensorLayer::bufferIncomingRangeMsg, this));
+      range_subs_.push_back(nh.subscribe(topic_name, queue_size, &RangeSensorLayer::bufferIncomingRangeMsg, this));
 
       ROS_INFO("RangeSensorLayer: subscribed to topic %s", range_subs_.back().getTopic().c_str());
     }
