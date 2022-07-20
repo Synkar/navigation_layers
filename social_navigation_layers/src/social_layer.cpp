@@ -40,7 +40,6 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
   transformed_people_.clear();
 
   if(new_msg_available_){
-    new_msg_available_ = false;
     for (unsigned int i = 0; i < people_list_.people.size(); i++)
     {
       people_msgs::Person& person = people_list_.people[i];
@@ -72,17 +71,17 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
       }
       catch (tf2::LookupException& ex)
       {
-        ROS_ERROR("No Transform available Error: %s\n", ex.what());
+        ROS_DEBUG("No Transform available Error: %s\n", ex.what());
         continue;
       }
       catch (tf2::ConnectivityException& ex)
       {
-        ROS_ERROR("Connectivity Error: %s\n", ex.what());
+        ROS_DEBUG("Connectivity Error: %s\n", ex.what());
         continue;
       }
       catch (tf2::ExtrapolationException& ex)
       {
-        ROS_ERROR("Extrapolation Error: %s\n", ex.what());
+        ROS_DEBUG("Extrapolation Error: %s\n", ex.what());
         continue;
       }
     }
