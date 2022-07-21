@@ -142,10 +142,10 @@ void ProxemicLayer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, i
         else
           a = gaussian(x, y, cx, cy, amplitude_, covar_,       covar_, 0);
 
+        a = std::min(a+lethal_cost_radius_, amplitude_);
+
         if (a < cutoff_)
           continue;
-
-        a = std::min(a+lethal_cost_radius_, amplitude_);
 
         unsigned char cvalue = (unsigned char) a;
         costmap->setCost(i + dx, j + dy, std::max(cvalue, old_cost));
