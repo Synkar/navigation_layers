@@ -35,9 +35,9 @@ protected:
   ros::Subscriber people_sub_;
   people_msgs::People people_list_;
   std::list<people_msgs::Person> transformed_people_;
-  ros::Duration people_keep_time_;
+  double people_keep_time_;
   boost::recursive_mutex lock_;
-  bool first_time_, new_msg_available_;
+  bool first_time_;
   double last_min_x_, last_min_y_, last_max_x_, last_max_y_;
 };
 }  // namespace social_navigation_layers

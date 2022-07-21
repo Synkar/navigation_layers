@@ -19,7 +19,6 @@ void SocialLayer::onInitialize()
   ros::NodeHandle nh("~/" + name_), g_nh;
   current_ = true;
   first_time_ = true;
-  new_msg_available_ = false;
   people_sub_ = nh.subscribe("/people", 1, &SocialLayer::peopleCallback, this);
 }
 
@@ -27,7 +26,6 @@ void SocialLayer::peopleCallback(const people_msgs::People& people)
 {
   boost::recursive_mutex::scoped_lock lock(lock_);
   people_list_ = people;
-  new_msg_available_ = true;
 }
 
 
@@ -38,8 +36,7 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
 
   std::string global_frame = layered_costmap_->getGlobalFrameID();
   transformed_people_.clear();
-
-  if(new_msg_available_){
+  if((ros::Time::now() - people_list_.header.stamp).toSec() < people_keep_time_){
     for (unsigned int i = 0; i < people_list_.people.size(); i++)
     {
       people_msgs::Person& person = people_list_.people[i];
@@ -53,7 +50,7 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
         pt.point.z = person.position.z;
         pt.header.frame_id = people_list_.header.frame_id;
         pt.header.stamp = people_list_.header.stamp;
-        tf_->transform(pt, opt, global_frame, ros::Duration(0.1));
+        tf_->transform(pt, opt, global_frame);
         tpt.position.x = opt.point.x;
         tpt.position.y = opt.point.y;
         tpt.position.z = opt.point.z;
@@ -61,7 +58,7 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
         pt.point.x += person.velocity.x;
         pt.point.y += person.velocity.y;
         pt.point.z += person.velocity.z;
-        tf_->transform(pt, opt, global_frame, ros::Duration(0.1));
+        tf_->transform(pt, opt, global_frame);
 
         tpt.velocity.x = opt.point.x - tpt.position.x;
         tpt.velocity.y = opt.point.y - tpt.position.y;
@@ -86,6 +83,7 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
       }
     }
   }
+  
   updateBoundsFromPeople(min_x, min_y, max_x, max_y);
   if (first_time_)
   {

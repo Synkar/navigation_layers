@@ -160,7 +160,7 @@ void ProxemicLayer::configure(ProxemicLayerConfig &config, uint32_t level)
   amplitude_ = config.amplitude;
   covar_ = config.covariance;
   factor_ = config.factor;
-  people_keep_time_ = ros::Duration(config.keep_time);
+  people_keep_time_ = config.keep_time;
   enabled_ = config.enabled;
   lethal_cost_radius_ = std::max(0.0, amplitude_ - config.lethal_cost);
 
