@@ -53,7 +53,7 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
         pt.point.z = person.position.z;
         pt.header.frame_id = people_list_.header.frame_id;
         pt.header.stamp = people_list_.header.stamp;
-        tf_->transform(pt, opt, global_frame, ros::Duration(1.0));
+        tf_->transform(pt, opt, global_frame, ros::Duration(0.1));
         tpt.position.x = opt.point.x;
         tpt.position.y = opt.point.y;
         tpt.position.z = opt.point.z;
@@ -61,7 +61,7 @@ void SocialLayer::updateBounds(double origin_x, double origin_y, double origin_z
         pt.point.x += person.velocity.x;
         pt.point.y += person.velocity.y;
         pt.point.z += person.velocity.z;
-        tf_->transform(pt, opt, global_frame, ros::Duration(1.0));
+        tf_->transform(pt, opt, global_frame, ros::Duration(0.1));
 
         tpt.velocity.x = opt.point.x - tpt.position.x;
         tpt.velocity.y = opt.point.y - tpt.position.y;

@@ -25,7 +25,7 @@ public:
 
 protected:
   void configure(ProxemicLayerConfig &config, uint32_t level);
-  double cutoff_, amplitude_, covar_, factor_;
+  double cutoff_, amplitude_, covar_, factor_, lethal_cost_radius_;
   dynamic_reconfigure::Server<ProxemicLayerConfig>* server_;
   dynamic_reconfigure::Server<ProxemicLayerConfig>::CallbackType f_;
 };

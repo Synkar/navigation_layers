@@ -144,6 +144,9 @@ void ProxemicLayer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, i
 
         if (a < cutoff_)
           continue;
+
+        a = std::min(a+lethal_cost_radius_, amplitude_);
+
         unsigned char cvalue = (unsigned char) a;
         costmap->setCost(i + dx, j + dy, std::max(cvalue, old_cost));
       }
@@ -159,5 +162,7 @@ void ProxemicLayer::configure(ProxemicLayerConfig &config, uint32_t level)
   factor_ = config.factor;
   people_keep_time_ = ros::Duration(config.keep_time);
   enabled_ = config.enabled;
+  lethal_cost_radius_ = std::max(0.0, amplitude_ - config.lethal_cost);
+
 }
 };  // namespace social_navigation_layers
