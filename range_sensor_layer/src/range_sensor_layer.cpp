@@ -111,7 +111,7 @@ void RangeSensorLayer::onInitialize()
       ROS_INFO("RangeSensorLayer: subscribed to topic %s", range_subs_.back().getTopic().c_str());
     }
   }
-
+  access_history_ = new mutex_t();
   dsrv_ = new dynamic_reconfigure::Server<range_sensor_layer::RangeSensorLayerConfig>(nh);
   dynamic_reconfigure::Server<range_sensor_layer::RangeSensorLayerConfig>::CallbackType cb =
     boost::bind(&RangeSensorLayer::reconfigureCB, this, _1, _2);
@@ -369,20 +369,25 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
 void RangeSensorLayer::removeOutdatedReadings()
 {
   std::map<std::pair<unsigned int, unsigned int>, double>::iterator it_map;
+  boost::unique_lock<mutex_t> lock(*access_history_);
 
-  double removal_time = last_reading_time_.toSec() - pixel_decay_;
-  for (it_map = marked_point_history_.begin() ; it_map != marked_point_history_.end() ; it_map++ )
-  {
-    if(it_map->second < removal_time)
+  for (auto cell : marked_point_history_ ) {
+   
+    if((last_reading_time_ - cell.stamp).toSec()> pixel_decay_)
     {
-      marked_point_history_.erase(it_map);
-      setCost(std::get<0>(it_map->first), std::get<1>(it_map->first), costmap_2d::FREE_SPACE);
+      unsigned int x,y;
+      if(worldToMap(cell.wx, cell.wy, x, y)){
+        setCost(x, y, costmap_2d::FREE_SPACE);
+      }
+      marked_point_history_.erase(marked_point_history_.begin() + cell.index);
     }
   }
 }
 
 void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear)
 {
+  boost::unique_lock<mutex_t> lock(*access_history_);
+
   unsigned int x, y;
   if (worldToMap(nx, ny, x, y))
   {
@@ -405,18 +410,34 @@ void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, do
     setCost(x, y, c);
     if(use_decay_)
     {
-      std::pair<unsigned int, unsigned int> coordinate_pair(x, y);
+      int idx=0;
+      for (auto cell : marked_point_history_ ) {
+        if(cell.index==getIndex(x,y)){
+          break;
+        }
+        idx++;
+      }
+
+      double wx, wy;
+      mapToWorld(x,y,wx,wy);
       // If the point has a score high enough to be marked in the costmap, we add it's time to the marked_point_history
-      if(c > to_cost(mark_threshold_))
-        marked_point_history_[coordinate_pair] = last_reading_time_.toSec();
+      if(c > to_cost(mark_threshold_)){
+        if(idx>=int(marked_point_history_.size())){
+          marked_point_history_.push_back({getIndex(x,y),wx,wy,last_reading_time_});
+        }
+        else{
+          marked_point_history_[idx].stamp = last_reading_time_;
+          marked_point_history_[idx].wx = wx;
+          marked_point_history_[idx].wy = wy;
+        }
+      }
       // If the point score is not high enough, we try to find it in the mark history point.
       // In the case we find it in the marked_point_history we clear it from the map so we won't checked already cleared point
       else if(c < to_cost(clear_threshold_))
       {
-        std::map<std::pair<unsigned int, unsigned int>, double>::iterator it_clear;
-        it_clear = marked_point_history_.find(coordinate_pair);
-        if(it_clear != marked_point_history_.end())
-          marked_point_history_.erase(it_clear);
+        if(idx<int(marked_point_history_.size())){
+          marked_point_history_.erase(marked_point_history_.begin() + idx);
+        }
       }
     }
   }
@@ -431,9 +452,30 @@ void RangeSensorLayer::resetRange()
 void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot_yaw,
                                     double* min_x, double* min_y, double* max_x, double* max_y)
 {
-  if (layered_costmap_->isRolling())
+  if (layered_costmap_->isRolling()){
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
 
+    if(use_decay_)
+    {
+      boost::unique_lock<mutex_t> lock(*access_history_);
+
+      unsigned int x,y, i;
+      for(auto it = marked_point_history_.begin(); it != marked_point_history_.end(); )    {
+        
+        //If outside costmap
+        if(!worldToMap(it->wx, it->wy, x, y)){
+          it = marked_point_history_.erase(it);
+          continue;
+        }
+
+        //Update index of each cell
+        it->index = getIndex(x,y);
+        it++;
+        i++;
+      }
+    }
+  }
+  
   updateCostmap();
 
   *min_x = std::min(*min_x, min_x_);

@@ -13,9 +13,17 @@
 #include <utility>
 #include <vector>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <boost/thread.hpp>
 
 namespace range_sensor_layer
 {
+
+struct Cell{
+  unsigned int index;
+  double wx;
+  double wy;
+  ros::Time stamp;
+};
 
 class RangeSensorLayer : public costmap_2d::CostmapLayer
 {
@@ -69,7 +77,7 @@ private:
   boost::function<void(sensor_msgs::Range& range_message)> processRangeMessageFunc_;
   boost::mutex range_message_mutex_;
   std::list<sensor_msgs::Range> range_msgs_buffer_;
-  std::map<std::pair<unsigned int, unsigned int>, double> marked_point_history_;
+  std::vector<Cell> marked_point_history_;
 
   double max_angle_, phi_v_;
   double inflate_cone_;
@@ -100,6 +108,10 @@ private:
   {
     return (Bx - Ax) * (Cy - Ay) - (By - Ay) * (Cx - Ax);
   };
+
+  typedef boost::recursive_mutex mutex_t;
+  mutex_t* access_history_;
+
 };
 }  // namespace range_sensor_layer
 #endif  // RANGE_SENSOR_LAYER_RANGE_SENSOR_LAYER_H
