@@ -23,9 +23,6 @@ RangeSensorLayer::RangeSensorLayer() {}
 void RangeSensorLayer::onInitialize()
 {
   ros::NodeHandle nh("~/" + name_);
-  current_ = true;
-  buffered_readings_ = 0;
-  last_reading_time_ = ros::Time::now();
   default_value_ = to_cost(0.5);
 
   matchSize();
@@ -111,7 +108,7 @@ void RangeSensorLayer::onInitialize()
       ROS_INFO("RangeSensorLayer: subscribed to topic %s", range_subs_.back().getTopic().c_str());
     }
   }
-
+  access_history_ = new mutex_t();
   dsrv_ = new dynamic_reconfigure::Server<range_sensor_layer::RangeSensorLayerConfig>(nh);
   dynamic_reconfigure::Server<range_sensor_layer::RangeSensorLayerConfig>::CallbackType cb =
     boost::bind(&RangeSensorLayer::reconfigureCB, this, _1, _2);
@@ -169,15 +166,15 @@ void RangeSensorLayer::reconfigureCB(range_sensor_layer::RangeSensorLayerConfig 
 {
   phi_v_ = config.phi;
   inflate_cone_ = config.inflate_cone;
-  no_readings_timeout_ = config.no_readings_timeout;
   clear_threshold_ = config.clear_threshold;
   mark_threshold_ = config.mark_threshold;
   clear_on_max_reading_ = config.clear_on_max_reading;
-
+  use_decay_ = config.use_decay;
+  pixel_decay_ = config.pixel_decay;
+  
   if (enabled_ != config.enabled)
   {
     enabled_ = config.enabled;
-    current_ = false;
   }
 }
 
@@ -189,18 +186,26 @@ void RangeSensorLayer::bufferIncomingRangeMsg(const sensor_msgs::RangeConstPtr& 
 
 void RangeSensorLayer::updateCostmap()
 {
-  std::list<sensor_msgs::Range> range_msgs_buffer_copy;
 
   range_message_mutex_.lock();
-  range_msgs_buffer_copy = std::list<sensor_msgs::Range>(range_msgs_buffer_);
-  range_msgs_buffer_.clear();
-  range_message_mutex_.unlock();
 
-  for (std::list<sensor_msgs::Range>::iterator range_msgs_it = range_msgs_buffer_copy.begin();
-       range_msgs_it != range_msgs_buffer_copy.end(); range_msgs_it++)
+  //If we use decay we clear all the costmap in order to fill it with old measurements
+  if(use_decay_)
+    resetMaps();
+
+  for (std::list<sensor_msgs::Range>::iterator range_msgs_it = range_msgs_buffer_.begin();
+       range_msgs_it != range_msgs_buffer_.end(); )
   {
     processRangeMessageFunc_(*range_msgs_it);
+    //If we are going to use decay then we keep measures in the buffer
+    if( !use_decay_ || (use_decay_ && (ros::Time::now() - (*range_msgs_it).header.stamp).toSec() > pixel_decay_ )){
+      range_msgs_it = range_msgs_buffer_.erase(range_msgs_it);
+    }else{
+      range_msgs_it++;
+    }
   }
+
+  range_message_mutex_.unlock();
 }
 
 void RangeSensorLayer::processRangeMsg(sensor_msgs::Range& range_message)
@@ -359,30 +364,13 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
       }
     }
   }
-
-  buffered_readings_++;
-  last_reading_time_ = ros::Time::now();
-  if(use_decay_)
-    removeOutdatedReadings();
 }
 
-void RangeSensorLayer::removeOutdatedReadings()
-{
-  std::map<std::pair<unsigned int, unsigned int>, double>::iterator it_map;
-
-  double removal_time = last_reading_time_.toSec() - pixel_decay_;
-  for (it_map = marked_point_history_.begin() ; it_map != marked_point_history_.end() ; it_map++ )
-  {
-    if(it_map->second < removal_time)
-    {
-      marked_point_history_.erase(it_map);
-      setCost(std::get<0>(it_map->first), std::get<1>(it_map->first), costmap_2d::FREE_SPACE);
-    }
-  }
-}
 
 void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear)
 {
+  boost::unique_lock<mutex_t> lock(*access_history_);
+
   unsigned int x, y;
   if (worldToMap(nx, ny, x, y))
   {
@@ -403,22 +391,6 @@ void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, do
     unsigned char c = to_cost(new_prob);
 
     setCost(x, y, c);
-    if(use_decay_)
-    {
-      std::pair<unsigned int, unsigned int> coordinate_pair(x, y);
-      // If the point has a score high enough to be marked in the costmap, we add it's time to the marked_point_history
-      if(c > to_cost(mark_threshold_))
-        marked_point_history_[coordinate_pair] = last_reading_time_.toSec();
-      // If the point score is not high enough, we try to find it in the mark history point.
-      // In the case we find it in the marked_point_history we clear it from the map so we won't checked already cleared point
-      else if(c < to_cost(clear_threshold_))
-      {
-        std::map<std::pair<unsigned int, unsigned int>, double>::iterator it_clear;
-        it_clear = marked_point_history_.find(coordinate_pair);
-        if(it_clear != marked_point_history_.end())
-          marked_point_history_.erase(it_clear);
-      }
-    }
   }
 }
 
@@ -431,9 +403,10 @@ void RangeSensorLayer::resetRange()
 void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot_yaw,
                                     double* min_x, double* min_y, double* max_x, double* max_y)
 {
-  if (layered_costmap_->isRolling())
+  if (layered_costmap_->isRolling()){
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
-
+  }
+  
   updateCostmap();
 
   *min_x = std::min(*min_x, min_x_);
@@ -442,24 +415,6 @@ void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot
   *max_y = std::max(*max_y, max_y_);
 
   resetRange();
-
-  if (!enabled_)
-  {
-    current_ = true;
-    return;
-  }
-
-  if (buffered_readings_ == 0)
-  {
-    if (no_readings_timeout_ > 0.0 &&
-        (ros::Time::now() - last_reading_time_).toSec() > no_readings_timeout_)
-    {
-      ROS_WARN_THROTTLE(2.0, "No range readings received for %.2f seconds, " \
-                        "while expected at least every %.2f seconds.",
-                        (ros::Time::now() - last_reading_time_).toSec(), no_readings_timeout_);
-      current_ = false;
-    }
-  }
 }
 
 void RangeSensorLayer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int min_j, int max_i, int max_j)
@@ -500,9 +455,6 @@ void RangeSensorLayer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i
       it++;
     }
   }
-
-  buffered_readings_ = 0;
-  current_ = true;
 }
 
 void RangeSensorLayer::reset()
@@ -510,7 +462,6 @@ void RangeSensorLayer::reset()
   ROS_DEBUG("Reseting range sensor layer...");
   deactivate();
   resetMaps();
-  current_ = true;
   activate();
 }
 
