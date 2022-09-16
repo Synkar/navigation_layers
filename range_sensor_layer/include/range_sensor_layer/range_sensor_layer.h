@@ -18,6 +18,13 @@
 namespace range_sensor_layer
 {
 
+struct Observation{
+  geometry_msgs::Point origin, target;
+  ros::Time stamp;
+  double range;
+  double max_angle;
+  bool clear_sensor_cone;
+};
 
 class RangeSensorLayer : public costmap_2d::CostmapLayer
 {
@@ -46,18 +53,18 @@ private:
   void processRangeMsg(sensor_msgs::Range& range_message);
   void processFixedRangeMsg(sensor_msgs::Range& range_message);
   void processVariableRangeMsg(sensor_msgs::Range& range_message);
+  void fillObservationBuffer(sensor_msgs::Range range_message, bool clear_sensor_cone);
 
   void resetRange();
   void updateCostmap();
-  void updateCostmap(sensor_msgs::Range& range_message, bool clear_sensor_cone);
+  void updateCostmap(Observation obs);
 
-  double gamma(double theta);
+  double gamma(double theta, double max_angle);
   double delta(double phi);
-  double sensor_model(double r, double phi, double theta);
+  double sensor_model(double r, double phi, double theta, double max_angle);
 
   void get_deltas(double angle, double *dx, double *dy);
-  void update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear);
-
+  void update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear, double max_angle);
   double to_prob(unsigned char c)
   {
     return static_cast<double>(c) / costmap_2d::LETHAL_OBSTACLE;
@@ -70,6 +77,7 @@ private:
   boost::function<void(sensor_msgs::Range& range_message)> processRangeMessageFunc_;
   boost::mutex range_message_mutex_;
   std::list<sensor_msgs::Range> range_msgs_buffer_;
+  std::vector<Observation> observation_buffer_;
 
   double max_angle_, phi_v_;
   double inflate_cone_;
