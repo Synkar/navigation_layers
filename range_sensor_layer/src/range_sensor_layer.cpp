@@ -197,8 +197,8 @@ void RangeSensorLayer::updateCostmap()
        range_msgs_it != range_msgs_buffer_.end(); )
   {
     processRangeMessageFunc_(*range_msgs_it);
-    //If we are going to use decay then we keep measures in the buffer
-    if( !use_decay_ || (use_decay_ && (ros::Time::now() - (*range_msgs_it).header.stamp).toSec() > pixel_decay_ )){
+    //If we are going to use decay then we keep detected collisions in buffer
+    if( !use_decay_ || (use_decay_ && (ros::Time::now() - range_msgs_it->header.stamp).toSec() > pixel_decay_) || range_msgs_it->range>=range_msgs_it->max_range){
       range_msgs_it = range_msgs_buffer_.erase(range_msgs_it);
     }else{
       range_msgs_it++;
