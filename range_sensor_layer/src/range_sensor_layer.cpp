@@ -173,6 +173,8 @@ void RangeSensorLayer::reconfigureCB(range_sensor_layer::RangeSensorLayerConfig 
   clear_threshold_ = config.clear_threshold;
   mark_threshold_ = config.mark_threshold;
   clear_on_max_reading_ = config.clear_on_max_reading;
+  use_decay_ = config.use_decay;
+  pixel_decay_ = config.pixel_decay;
 
   if (enabled_ != config.enabled)
   {
@@ -362,27 +364,30 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
 
   buffered_readings_++;
   last_reading_time_ = ros::Time::now();
-  // if(use_decay_)
-    // removeOutdatedReadings();
 }
 
 void RangeSensorLayer::removeOutdatedReadings()
 {
-  std::map<std::pair<unsigned int, unsigned int>, double>::iterator it_map;
-  boost::unique_lock<mutex_t> lock(*access_history_);
+  unsigned int x,y;
+  for(std::vector<Cell>::iterator cell_it = marked_point_history_.begin(); 
+                                  cell_it != marked_point_history_.end(); )    {
 
-  for (std::vector<Cell>::iterator cell_it = marked_point_history_.begin();
-       cell_it != marked_point_history_.end(); )
-  {
-   
-    if((last_reading_time_ - (*cell_it).stamp).toSec()> pixel_decay_)
-    {
-      unsigned int x,y;
-      if(worldToMap((*cell_it).wx, (*cell_it).wy, x, y)){
-        setCost(x, y, costmap_2d::FREE_SPACE);
-      }
+      //If outside costmap
+    if(!worldToMap(cell_it->wx, cell_it->wy, x, y)){
       cell_it = marked_point_history_.erase(cell_it);
+      continue;
     }
+
+    if((ros::Time::now() - cell_it->stamp).toSec() > pixel_decay_)
+    {
+      setCost(x, y, costmap_2d::FREE_SPACE);
+      cell_it = marked_point_history_.erase(cell_it);
+      continue;
+    }
+
+    //Update index of each cell
+    cell_it->index = getIndex(x,y);
+    cell_it++;
   }
 }
 
@@ -410,35 +415,10 @@ void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, do
     setCost(x, y, c);
     if(use_decay_)
     {
-      // int idx=0;
-      // for (auto cell : marked_point_history_ ) {
-      //   if(cell.index==getIndex(x,y)){
-      //     break;
-      //   }
-      //   idx++;
-      // }
-
-      double wx, wy;
-      mapToWorld(x,y,wx,wy);
       // If the point has a score high enough to be marked in the costmap, we add it's time to the marked_point_history
       if(c > to_cost(mark_threshold_)){
-        // if(idx>=int(marked_point_history_.size())){
-          marked_point_history_.push_back({getIndex(x,y),wx,wy,ros::Time::now()});
-        // }
-        // else{
-        //   marked_point_history_[idx].stamp = last_reading_time_;
-        //   marked_point_history_[idx].wx = wx;
-        //   marked_point_history_[idx].wy = wy;
-        // }
+          marked_point_history_.push_back({getIndex(x,y),nx,ny,ros::Time::now()});
       }
-      // If the point score is not high enough, we try to find it in the mark history point.
-      // In the case we find it in the marked_point_history we clear it from the map so we won't checked already cleared point
-      // else if(c < to_cost(clear_threshold_))
-      // {
-      //   if(idx<int(marked_point_history_.size())){
-      //     marked_point_history_.erase(marked_point_history_.begin() + idx);
-      //   }
-      // }
     }
   }
 }
@@ -454,33 +434,11 @@ void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot
 {
   if (layered_costmap_->isRolling()){
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
-
-    if(use_decay_)
-    {
-      unsigned int x,y;
-      for(std::vector<Cell>::iterator cell_it = marked_point_history_.begin(); 
-                                      cell_it != marked_point_history_.end(); )    {
-
-          //If outside costmap
-        if(!worldToMap(cell_it->wx, cell_it->wy, x, y)){
-          cell_it = marked_point_history_.erase(cell_it);
-          continue;
-        }
-
-        if((ros::Time::now() - cell_it->stamp).toSec() > pixel_decay_)
-        {
-          setCost(x, y, costmap_2d::FREE_SPACE);
-          cell_it = marked_point_history_.erase(cell_it);
-          continue;
-        }
-
-        //Update index of each cell
-        cell_it->index = getIndex(x,y);
-        cell_it++;
-      }
-    }
   }
-  
+
+  if(use_decay_)
+      removeOutdatedReadings();
+
   updateCostmap();
 
   *min_x = std::min(*min_x, min_x_);
