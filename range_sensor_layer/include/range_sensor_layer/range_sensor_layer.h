@@ -18,12 +18,15 @@
 namespace range_sensor_layer
 {
 
-struct Observation{
-  geometry_msgs::Point origin, target;
+struct Cell{
+  unsigned int index;
+  double wx;
+  double wy;
   ros::Time stamp;
-  double range;
-  double max_angle;
-  bool clear_sensor_cone;
+    bool operator==(const Cell& other) const
+  {
+    return index==other.index;
+  }
 };
 
 class RangeSensorLayer : public costmap_2d::CostmapLayer
@@ -53,18 +56,19 @@ private:
   void processRangeMsg(sensor_msgs::Range& range_message);
   void processFixedRangeMsg(sensor_msgs::Range& range_message);
   void processVariableRangeMsg(sensor_msgs::Range& range_message);
-  void fillObservationBuffer(sensor_msgs::Range range_message, bool clear_sensor_cone);
 
   void resetRange();
   void updateCostmap();
-  void updateCostmap(Observation obs);
+  void updateCostmap(sensor_msgs::Range& range_message, bool clear_sensor_cone);
+  void removeOutdatedReadings();
 
-  double gamma(double theta, double max_angle);
+  double gamma(double theta);
   double delta(double phi);
-  double sensor_model(double r, double phi, double theta, double max_angle);
+  double sensor_model(double r, double phi, double theta);
 
   void get_deltas(double angle, double *dx, double *dy);
-  void update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear, double max_angle);
+  void update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear);
+
   double to_prob(unsigned char c)
   {
     return static_cast<double>(c) / costmap_2d::LETHAL_OBSTACLE;
@@ -77,7 +81,7 @@ private:
   boost::function<void(sensor_msgs::Range& range_message)> processRangeMessageFunc_;
   boost::mutex range_message_mutex_;
   std::list<sensor_msgs::Range> range_msgs_buffer_;
-  std::vector<Observation> observation_buffer_;
+  std::vector<Cell> marked_point_history_;
 
   double max_angle_, phi_v_;
   double inflate_cone_;
@@ -86,6 +90,9 @@ private:
   double clear_threshold_, mark_threshold_;
   bool clear_on_max_reading_;
 
+  double no_readings_timeout_;
+  ros::Time last_reading_time_;
+  unsigned int buffered_readings_;
   std::vector<ros::Subscriber> range_subs_;
   double min_x_, min_y_, max_x_, max_y_;
 

@@ -23,6 +23,9 @@ RangeSensorLayer::RangeSensorLayer() {}
 void RangeSensorLayer::onInitialize()
 {
   ros::NodeHandle nh("~/" + name_);
+  current_ = true;
+  buffered_readings_ = 0;
+  last_reading_time_ = ros::Time::now();
   default_value_ = to_cost(0.5);
 
   matchSize();
@@ -117,12 +120,12 @@ void RangeSensorLayer::onInitialize()
 }
 
 
-double RangeSensorLayer::gamma(double theta, double max_angle)
+double RangeSensorLayer::gamma(double theta)
 {
-  if (fabs(theta) > max_angle)
+  if (fabs(theta) > max_angle_)
     return 0.0;
   else
-    return 1 - pow(theta / max_angle, 2);
+    return 1 - pow(theta / max_angle_, 2);
 }
 
 double RangeSensorLayer::delta(double phi)
@@ -142,9 +145,9 @@ void RangeSensorLayer::get_deltas(double angle, double *dx, double *dy)
   *dy = copysign(resolution_, sin(angle));
 }
 
-double RangeSensorLayer::sensor_model(double r, double phi, double theta, double max_angle)
+double RangeSensorLayer::sensor_model(double r, double phi, double theta)
 {
-  double lbda = delta(phi) * gamma(theta, max_angle);
+  double lbda = delta(phi) * gamma(theta);
 
   double delta = resolution_;
 
@@ -166,46 +169,39 @@ void RangeSensorLayer::reconfigureCB(range_sensor_layer::RangeSensorLayerConfig 
 {
   phi_v_ = config.phi;
   inflate_cone_ = config.inflate_cone;
+  no_readings_timeout_ = config.no_readings_timeout;
   clear_threshold_ = config.clear_threshold;
   mark_threshold_ = config.mark_threshold;
   clear_on_max_reading_ = config.clear_on_max_reading;
-  use_decay_ = config.use_decay;
-  pixel_decay_ = config.pixel_decay;
-  
+
   if (enabled_ != config.enabled)
   {
     enabled_ = config.enabled;
+    current_ = false;
   }
 }
 
 void RangeSensorLayer::bufferIncomingRangeMsg(const sensor_msgs::RangeConstPtr& range_message)
 {
-  sensor_msgs::Range msg = *range_message;
-  processRangeMessageFunc_(msg);
-
+  boost::mutex::scoped_lock lock(range_message_mutex_);
+  range_msgs_buffer_.push_back(*range_message);
 }
 
 void RangeSensorLayer::updateCostmap()
 {
-  if(use_decay_)
-    resetMaps();
+  std::list<sensor_msgs::Range> range_msgs_buffer_copy;
 
   range_message_mutex_.lock();
-
-  for (std::vector<Observation>::iterator obs_it = observation_buffer_.begin();
-       obs_it != observation_buffer_.end(); )
-  {
-    updateCostmap(*obs_it);
-    if(!use_decay_ || (use_decay_ && abs((ros::Time::now() - obs_it->stamp).toSec())>pixel_decay_)){
-      obs_it = observation_buffer_.erase(obs_it);
-    }
-    else{
-      obs_it++;
-    }
-  }
+  range_msgs_buffer_copy = std::list<sensor_msgs::Range>(range_msgs_buffer_);
+  range_msgs_buffer_.clear();
   range_message_mutex_.unlock();
-}
 
+  for (std::list<sensor_msgs::Range>::iterator range_msgs_it = range_msgs_buffer_copy.begin();
+       range_msgs_it != range_msgs_buffer_copy.end(); range_msgs_it++)
+  {
+    processRangeMessageFunc_(*range_msgs_it);
+  }
+}
 
 void RangeSensorLayer::processRangeMsg(sensor_msgs::Range& range_message)
 {
@@ -238,7 +234,7 @@ void RangeSensorLayer::processFixedRangeMsg(sensor_msgs::Range& range_message)
 
   range_message.range = range_message.min_range;
 
-  fillObservationBuffer(range_message, clear_sensor_cone);
+  updateCostmap(range_message, clear_sensor_cone);
 }
 
 void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message)
@@ -251,10 +247,13 @@ void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message
   if (range_message.range == range_message.max_range && clear_on_max_reading_)
     clear_sensor_cone = true;
 
-  fillObservationBuffer(range_message, clear_sensor_cone);
+  updateCostmap(range_message, clear_sensor_cone);
 }
 
-void RangeSensorLayer::fillObservationBuffer(sensor_msgs::Range range_message, bool clear_sensor_cone){
+void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool clear_sensor_cone)
+{
+  max_angle_ = range_message.field_of_view / 2;
+
   geometry_msgs::PointStamped in, out;
   in.header.stamp = range_message.header.stamp;
   in.header.frame_id = range_message.header.frame_id;
@@ -267,33 +266,15 @@ void RangeSensorLayer::fillObservationBuffer(sensor_msgs::Range range_message, b
     return;
   }
 
-  Observation obs;
   tf_->transform(in, out, global_frame_);
 
-  obs.origin = out.point;
+  double ox = out.point.x, oy = out.point.y;
 
   in.point.x = range_message.range;
 
   tf_->transform(in, out, global_frame_);
 
-  obs.target = out.point;
-  obs.max_angle = range_message.field_of_view / 2;
-  obs.clear_sensor_cone = clear_sensor_cone;
-  obs.range = range_message.range;
-  obs.stamp = range_message.header.stamp;
-  
-  range_message_mutex_.lock();
-  observation_buffer_.push_back(obs);
-  range_message_mutex_.unlock();
-
-}
-
-void RangeSensorLayer::updateCostmap(Observation obs)
-{
-  
-  double ox = obs.origin.x, oy = obs.origin.y;
-
-  double tx = obs.target.x, ty = obs.target.y;
+  double tx = out.point.x, ty = out.point.y;
 
   // calculate target props
   double dx = tx - ox, dy = ty - oy, theta = atan2(dy, dx), d = sqrt(dx * dx + dy * dy);
@@ -322,8 +303,8 @@ void RangeSensorLayer::updateCostmap(Observation obs)
   double mx, my;
 
   // Update left side of sonar cone
-  mx = ox + cos(theta - obs.max_angle) * d * 1.2;
-  my = oy + sin(theta - obs.max_angle) * d * 1.2;
+  mx = ox + cos(theta - max_angle_) * d * 1.2;
+  my = oy + sin(theta - max_angle_) * d * 1.2;
   worldToMapNoBounds(mx, my, Ax, Ay);
   bx0 = std::min(bx0, Ax);
   bx1 = std::max(bx1, Ax);
@@ -332,8 +313,8 @@ void RangeSensorLayer::updateCostmap(Observation obs)
   touch(mx, my, &min_x_, &min_y_, &max_x_, &max_y_);
 
   // Update right side of sonar cone
-  mx = ox + cos(theta + obs.max_angle) * d * 1.2;
-  my = oy + sin(theta + obs.max_angle) * d * 1.2;
+  mx = ox + cos(theta + max_angle_) * d * 1.2;
+  my = oy + sin(theta + max_angle_) * d * 1.2;
 
   worldToMapNoBounds(mx, my, Bx, By);
   bx0 = std::min(bx0, Bx);
@@ -374,17 +355,39 @@ void RangeSensorLayer::updateCostmap(Observation obs)
       {
         double wx, wy;
         mapToWorld(x, y, wx, wy);
-        update_cell(ox, oy, theta, obs.range, wx, wy, obs.clear_sensor_cone, obs.max_angle);
+        update_cell(ox, oy, theta, range_message.range, wx, wy, clear_sensor_cone);
       }
+    }
+  }
+
+  buffered_readings_++;
+  last_reading_time_ = ros::Time::now();
+  // if(use_decay_)
+    // removeOutdatedReadings();
+}
+
+void RangeSensorLayer::removeOutdatedReadings()
+{
+  std::map<std::pair<unsigned int, unsigned int>, double>::iterator it_map;
+  boost::unique_lock<mutex_t> lock(*access_history_);
+
+  for (std::vector<Cell>::iterator cell_it = marked_point_history_.begin();
+       cell_it != marked_point_history_.end(); )
+  {
+   
+    if((last_reading_time_ - (*cell_it).stamp).toSec()> pixel_decay_)
+    {
+      unsigned int x,y;
+      if(worldToMap((*cell_it).wx, (*cell_it).wy, x, y)){
+        setCost(x, y, costmap_2d::FREE_SPACE);
+      }
+      cell_it = marked_point_history_.erase(cell_it);
     }
   }
 }
 
-
-void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear, double max_angle)
+void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, double nx, double ny, bool clear)
 {
-  boost::unique_lock<mutex_t> lock(*access_history_);
-
   unsigned int x, y;
   if (worldToMap(nx, ny, x, y))
   {
@@ -394,7 +397,7 @@ void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, do
     double phi = sqrt(dx * dx + dy * dy);
     double sensor = 0.0;
     if (!clear)
-      sensor = sensor_model(r, phi, theta, max_angle);
+      sensor = sensor_model(r, phi, theta);
     double prior = to_prob(getCost(x, y));
     double prob_occ = sensor * prior;
     double prob_not = (1 - sensor) * (1 - prior);
@@ -405,6 +408,38 @@ void RangeSensorLayer::update_cell(double ox, double oy, double ot, double r, do
     unsigned char c = to_cost(new_prob);
 
     setCost(x, y, c);
+    if(use_decay_)
+    {
+      // int idx=0;
+      // for (auto cell : marked_point_history_ ) {
+      //   if(cell.index==getIndex(x,y)){
+      //     break;
+      //   }
+      //   idx++;
+      // }
+
+      double wx, wy;
+      mapToWorld(x,y,wx,wy);
+      // If the point has a score high enough to be marked in the costmap, we add it's time to the marked_point_history
+      if(c > to_cost(mark_threshold_)){
+        // if(idx>=int(marked_point_history_.size())){
+          marked_point_history_.push_back({getIndex(x,y),wx,wy,ros::Time::now()});
+        // }
+        // else{
+        //   marked_point_history_[idx].stamp = last_reading_time_;
+        //   marked_point_history_[idx].wx = wx;
+        //   marked_point_history_[idx].wy = wy;
+        // }
+      }
+      // If the point score is not high enough, we try to find it in the mark history point.
+      // In the case we find it in the marked_point_history we clear it from the map so we won't checked already cleared point
+      // else if(c < to_cost(clear_threshold_))
+      // {
+      //   if(idx<int(marked_point_history_.size())){
+      //     marked_point_history_.erase(marked_point_history_.begin() + idx);
+      //   }
+      // }
+    }
   }
 }
 
@@ -419,6 +454,31 @@ void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot
 {
   if (layered_costmap_->isRolling()){
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
+
+    if(use_decay_)
+    {
+      unsigned int x,y;
+      for(std::vector<Cell>::iterator cell_it = marked_point_history_.begin(); 
+                                      cell_it != marked_point_history_.end(); )    {
+
+          //If outside costmap
+        if(!worldToMap(cell_it->wx, cell_it->wy, x, y)){
+          cell_it = marked_point_history_.erase(cell_it);
+          continue;
+        }
+
+        if((ros::Time::now() - cell_it->stamp).toSec() > pixel_decay_)
+        {
+          setCost(x, y, costmap_2d::FREE_SPACE);
+          cell_it = marked_point_history_.erase(cell_it);
+          continue;
+        }
+
+        //Update index of each cell
+        cell_it->index = getIndex(x,y);
+        cell_it++;
+      }
+    }
   }
   
   updateCostmap();
@@ -429,6 +489,24 @@ void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot
   *max_y = std::max(*max_y, max_y_);
 
   resetRange();
+
+  if (!enabled_)
+  {
+    current_ = true;
+    return;
+  }
+
+  if (buffered_readings_ == 0)
+  {
+    if (no_readings_timeout_ > 0.0 &&
+        (ros::Time::now() - last_reading_time_).toSec() > no_readings_timeout_)
+    {
+      ROS_WARN_THROTTLE(2.0, "No range readings received for %.2f seconds, " \
+                        "while expected at least every %.2f seconds.",
+                        (ros::Time::now() - last_reading_time_).toSec(), no_readings_timeout_);
+      current_ = false;
+    }
+  }
 }
 
 void RangeSensorLayer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int min_j, int max_i, int max_j)
@@ -469,6 +547,9 @@ void RangeSensorLayer::updateCosts(costmap_2d::Costmap2D& master_grid, int min_i
       it++;
     }
   }
+
+  buffered_readings_ = 0;
+  current_ = true;
 }
 
 void RangeSensorLayer::reset()
@@ -476,6 +557,7 @@ void RangeSensorLayer::reset()
   ROS_DEBUG("Reseting range sensor layer...");
   deactivate();
   resetMaps();
+  current_ = true;
   activate();
 }
 
