@@ -371,31 +371,6 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
   last_reading_time_ = ros::Time::now();
 }
 
-// void RangeSensorLayer::removeOutdatedReadings()
-// {
-//   unsigned int x,y;
-//   for(std::vector<Cell>::iterator cell_it = marked_point_history_.begin(); 
-//                                   cell_it != marked_point_history_.end(); )    {
-
-//       //If outside costmap
-//     if(!worldToMap(cell_it->wx, cell_it->wy, x, y)){
-//       cell_it = marked_point_history_.erase(cell_it);
-//       continue;
-//     }
-
-//     if((ros::Time::now() - cell_it->stamp).toSec() > pixel_decay_)
-//     {
-//       setCost(x, y, costmap_2d::FREE_SPACE);
-//       cell_it = marked_point_history_.erase(cell_it);
-//       continue;
-//     }
-
-//     //Update index of each cell
-//     cell_it->index = getIndex(x,y);
-//     cell_it++;
-//   }
-// }
-
 void RangeSensorLayer::removeOutdatedReadings()
 {
 
@@ -413,11 +388,21 @@ void RangeSensorLayer::removeOutdatedReadings()
     std::pair<unsigned int, unsigned int> coordinate_pair(x, y);
     if((ros::Time::now() - cell_it->stamp).toSec() > pixel_decay_)
     {
-      clearing_points[coordinate_pair] = true;
+      try{
+        if(clearing_points.at(coordinate_pair))
+          clearing_points[coordinate_pair] = true;
+      }catch(const std::out_of_range& oor){
+        clearing_points[coordinate_pair] = true;
+      }
+      
       cell_it = marked_point_history_.erase(cell_it);
       continue;
     }else{
-      clearing_points[coordinate_pair] = false;
+      try{
+        if(clearing_points.at(coordinate_pair)==true)
+          clearing_points[coordinate_pair] = false;
+      }catch(const std::out_of_range& oor){
+      }
     }
 
     //Update index of each cell
