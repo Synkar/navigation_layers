@@ -89,7 +89,7 @@ private:
   std::string global_frame_;
 
   double clear_threshold_, mark_threshold_;
-  bool clear_on_max_reading_;
+  bool clear_on_max_reading_, mark_on_max_reading_;
 
   double no_readings_timeout_;
   ros::Time last_reading_time_;

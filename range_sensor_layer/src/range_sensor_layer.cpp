@@ -180,6 +180,7 @@ void RangeSensorLayer::reconfigureCB(range_sensor_layer::RangeSensorLayerConfig 
   clear_on_max_reading_ = config.clear_on_max_reading;
   use_decay_ = config.use_decay;
   pixel_decay_ = config.pixel_decay;
+  mark_on_max_reading_ = config.mark_on_max_reading;
 
   if (enabled_ != config.enabled)
   {
@@ -251,8 +252,12 @@ void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message
 
   bool clear_sensor_cone = false;
 
-  if (range_message.range == range_message.max_range && clear_on_max_reading_)
+  if (range_message.range == range_message.max_range && clear_on_max_reading_){
     clear_sensor_cone = true;
+  }else{
+    if (range_message.range == range_message.max_range && !mark_on_max_reading_)
+      return;
+  }
 
   updateCostmap(range_message, clear_sensor_cone);
 }
