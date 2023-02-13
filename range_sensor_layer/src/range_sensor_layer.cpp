@@ -180,7 +180,6 @@ void RangeSensorLayer::reconfigureCB(range_sensor_layer::RangeSensorLayerConfig 
   clear_on_max_reading_ = config.clear_on_max_reading;
   use_decay_ = config.use_decay;
   pixel_decay_ = config.pixel_decay;
-  mark_on_max_reading_ = config.mark_on_max_reading;
 
   if (enabled_ != config.enabled)
   {
@@ -243,23 +242,27 @@ void RangeSensorLayer::processFixedRangeMsg(sensor_msgs::Range& range_message)
   range_message.range = range_message.min_range;
 
   updateCostmap(range_message, clear_sensor_cone);
+
+  buffered_readings_++;
+  last_reading_time_ = ros::Time::now();
 }
 
 void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message)
 {
-  if (range_message.range < range_message.min_range || range_message.range > range_message.max_range)
-    return;
+  if (range_message.range >= range_message.min_range && range_message.range < range_message.max_range){
 
-  bool clear_sensor_cone = false;
+    bool clear_sensor_cone = false;
 
-  if (range_message.range == range_message.max_range && clear_on_max_reading_){
-    clear_sensor_cone = true;
+    if (range_message.range == range_message.max_range && clear_on_max_reading_){
+      clear_sensor_cone = true;
+    }
+      updateCostmap(range_message, clear_sensor_cone);
   }else{
-    if (range_message.range == range_message.max_range && !mark_on_max_reading_)
-      return;
+      ROS_DEBUG("Invalid range received. Ignoring sample");
   }
-
-  updateCostmap(range_message, clear_sensor_cone);
+  
+  buffered_readings_++;
+  last_reading_time_ = ros::Time::now();
 }
 
 void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool clear_sensor_cone)
@@ -371,9 +374,6 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
       }
     }
   }
-
-  buffered_readings_++;
-  last_reading_time_ = ros::Time::now();
 }
 
 void RangeSensorLayer::removeOutdatedReadings()
