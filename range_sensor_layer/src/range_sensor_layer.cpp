@@ -258,7 +258,7 @@ void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message
     }
       updateCostmap(range_message, clear_sensor_cone);
   }else{
-      ROS_DEBUG("Invalid range received. Ignoring sample");
+      ROS_DEBUG_THROTTLE(2.0, "Invalid range received. Ignoring sample");
   }
   
   buffered_readings_++;
