@@ -249,14 +249,21 @@ void RangeSensorLayer::processFixedRangeMsg(sensor_msgs::Range& range_message)
 
 void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message)
 {
-  if (range_message.range >= range_message.min_range && range_message.range < range_message.max_range){
+  if (range_message.range >= range_message.min_range && range_message.range <= range_message.max_range){
 
     bool clear_sensor_cone = false;
 
-    if (range_message.range == range_message.max_range && clear_on_max_reading_){
-      clear_sensor_cone = true;
+    if (range_message.range == range_message.max_range){
+      if(clear_on_max_reading_){
+        clear_sensor_cone = true;
+      }else{
+        //Ignore sample with max reading
+        return;
+      }
     }
-      updateCostmap(range_message, clear_sensor_cone);
+
+    updateCostmap(range_message, clear_sensor_cone);
+
   }else{
       ROS_DEBUG_THROTTLE(2.0, "Invalid range received. Ignoring sample");
   }
