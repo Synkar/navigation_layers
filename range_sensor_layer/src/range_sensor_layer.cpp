@@ -257,6 +257,8 @@ void RangeSensorLayer::processVariableRangeMsg(sensor_msgs::Range& range_message
       if(clear_on_max_reading_){
         clear_sensor_cone = true;
       }else{
+        buffered_readings_++;
+        last_reading_time_ = ros::Time::now();
         //Ignore sample with max reading
         return;
       }
