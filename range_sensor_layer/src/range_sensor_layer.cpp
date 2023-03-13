@@ -155,7 +155,11 @@ double RangeSensorLayer::sensor_model(double r, double phi, double theta)
   double lbda = delta(phi) * gamma(theta);
 
    double delta_r = range_constraints_*r;
-  if(use_fixed_range_constraints_)
+
+   //For fully undestanding, see the behavior in the following websites
+   // Variable delta_r (original code): https://www.desmos.com/calculator/xakg7p2tnj
+   // Fixed delta_r: https://www.desmos.com/calculator/bxxctvfd6o 
+  if(use_fixed_range_constraints_) 
     delta_r = range_constraints_;
 
   if (phi >= 0.0 && phi < r - 2 * delta_r)
