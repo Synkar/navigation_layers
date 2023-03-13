@@ -97,7 +97,7 @@ private:
   std::vector<ros::Subscriber> range_subs_;
   double min_x_, min_y_, max_x_, max_y_;
 
-  bool use_decay_, enable_variable_constraints_;
+  bool use_decay_, use_fixed_range_constraints_;
   double pixel_decay_;
   double transform_tolerance_;
 
