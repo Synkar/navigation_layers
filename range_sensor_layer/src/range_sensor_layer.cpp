@@ -154,15 +154,17 @@ double RangeSensorLayer::sensor_model(double r, double phi, double theta)
 {
   double lbda = delta(phi) * gamma(theta);
 
-  double delta = resolution_;
+   double delta_r = range_constraints_;
+  if(enable_variable_constraints_)
+    delta_r = range_constraints_*r;
 
-  if (phi >= 0.0 && phi < r - 2 * delta * r)
+  if (phi >= 0.0 && phi < r - 2 * delta_r)
     return (1 - lbda) * (0.5);
-  else if (phi < r - delta * r)
-    return lbda * 0.5 * pow((phi - (r - 2 * delta * r)) / (delta * r), 2) + (1 - lbda) * .5;
-  else if (phi < r + delta * r)
+  else if (phi < r - delta_r )
+    return lbda * 0.5 * pow((phi - (r - 2 * delta_r)) / (delta_r), 2) + (1 - lbda) * .5;
+  else if (phi < r + delta_r)
   {
-    double J = (r - phi) / (delta * r);
+    double J = (r - phi) / (delta_r);
     return lbda * ((1 - (0.5) * pow(J, 2)) - 0.5) + 0.5;
   }
   else
@@ -173,6 +175,8 @@ double RangeSensorLayer::sensor_model(double r, double phi, double theta)
 void RangeSensorLayer::reconfigureCB(range_sensor_layer::RangeSensorLayerConfig &config, uint32_t level)
 {
   phi_v_ = config.phi;
+  range_constraints_ = config.range_constraints;
+  enable_variable_constraints_ = config.enable_variable_constraints;
   inflate_cone_ = config.inflate_cone;
   no_readings_timeout_ = config.no_readings_timeout;
   clear_threshold_ = config.clear_threshold;
