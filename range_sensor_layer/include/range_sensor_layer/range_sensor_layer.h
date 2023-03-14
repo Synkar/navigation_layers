@@ -84,7 +84,7 @@ private:
   std::list<sensor_msgs::Range> range_msgs_buffer_;
   std::vector<Cell> marked_point_history_;
 
-  double max_angle_, phi_v_;
+  double max_angle_, phi_v_, range_constraints_;
   double inflate_cone_;
   std::string global_frame_;
 
@@ -97,7 +97,7 @@ private:
   std::vector<ros::Subscriber> range_subs_;
   double min_x_, min_y_, max_x_, max_y_;
 
-  bool use_decay_;
+  bool use_decay_, use_fixed_range_constraints_;
   double pixel_decay_;
   double transform_tolerance_;
 
