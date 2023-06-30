@@ -301,12 +301,22 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
   tf_->transform(in, out, global_frame_);
 
   double ox = out.point.x, oy = out.point.y;
+    //Make sure that the robot is inside the costmap to avoid bugs
+  unsigned int nox, noy;
+  if(!worldToMap(ox, oy, nox, noy)){
+    ROS_WARN_THROTTLE(2.0,"Robot is outside the costmap. Ignoring range message...");
+    return;
+  }
 
   in.point.x = range_message.range;
 
   tf_->transform(in, out, global_frame_);
 
   double tx = out.point.x, ty = out.point.y;
+  if(!worldToMap(tx, ty, nox, noy)){
+    ROS_WARN_THROTTLE(2.0,"Detected obstacle is outside the costmap. Ignoring range message...");
+    return;
+  }
 
   // calculate target props
   double dx = tx - ox, dy = ty - oy, theta = atan2(dy, dx), d = sqrt(dx * dx + dy * dy);
@@ -360,6 +370,12 @@ void RangeSensorLayer::updateCostmap(sensor_msgs::Range& range_message, bool cle
   by0 = std::max(0, by0);
   bx1 = std::min(static_cast<int>(size_x_), bx1);
   by1 = std::min(static_cast<int>(size_y_), by1);
+
+  // Avoid bugs with unsigned int conversion
+  if(bx0<0 || bx1<0 || by0<0 || by1<0){
+    ROS_DEBUG_COND(global_frame_.compare("map")==0, "bx1: %d => %u\t by1: %d => %u\t ", bx1, (unsigned int)bx1, by1, (unsigned int)by1);
+    return;
+  }
 
   for (unsigned int x = bx0; x <= (unsigned int)bx1; x++)
   {
@@ -485,6 +501,7 @@ void RangeSensorLayer::resetRange()
 void RangeSensorLayer::updateBounds(double robot_x, double robot_y, double robot_yaw,
                                     double* min_x, double* min_y, double* max_x, double* max_y)
 {
+
   if (layered_costmap_->isRolling()){
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
   }
